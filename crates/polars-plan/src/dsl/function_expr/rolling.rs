@@ -12,6 +12,8 @@ pub enum RollingFunction {
     Var,
     Std,
     Rank,
+    ArgMin,
+    ArgMax,
     #[cfg(feature = "moment")]
     Skew,
     #[cfg(feature = "moment")]
@@ -38,6 +40,8 @@ impl Display for RollingFunction {
             Var => "var",
             Std => "std",
             Rank => "rank",
+            ArgMin => "argmin",
+            ArgMax => "argmax",
             #[cfg(feature = "moment")]
             Skew => "skew",
             #[cfg(feature = "moment")]

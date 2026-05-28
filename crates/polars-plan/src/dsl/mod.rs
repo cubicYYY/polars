@@ -1220,6 +1220,16 @@ impl Expr {
         self.finish_rolling_by(by, options, RollingFunctionBy::RankBy)
     }
 
+    #[cfg(feature = "rolling_window_by")]
+    pub fn rolling_argmin_by(self, by: Expr, options: RollingOptionsDynamicWindow) -> Expr {
+        self.finish_rolling_by(by, options, RollingFunctionBy::ArgMinBy)
+    }
+
+    #[cfg(feature = "rolling_window_by")]
+    pub fn rolling_argmax_by(self, by: Expr, options: RollingOptionsDynamicWindow) -> Expr {
+        self.finish_rolling_by(by, options, RollingFunctionBy::ArgMaxBy)
+    }
+
     /// Apply a rolling minimum.
     ///
     /// See: [`RollingAgg::rolling_min`]
@@ -1295,6 +1305,16 @@ impl Expr {
     #[cfg(feature = "rolling_window")]
     pub fn rolling_rank(self, options: RollingOptionsFixedWindow) -> Expr {
         self.finish_rolling(options, RollingFunction::Rank)
+    }
+
+    #[cfg(feature = "rolling_window")]
+    pub fn rolling_argmin(self, options: RollingOptionsFixedWindow) -> Expr {
+        self.finish_rolling(options, RollingFunction::ArgMin)
+    }
+
+    #[cfg(feature = "rolling_window")]
+    pub fn rolling_argmax(self, options: RollingOptionsFixedWindow) -> Expr {
+        self.finish_rolling(options, RollingFunction::ArgMax)
     }
 
     /// Apply a rolling skew.

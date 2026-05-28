@@ -860,6 +860,8 @@ pub fn ir_function_to_dsl(input: Vec<Expr>, function: IRFunctionExpr) -> Expr {
                     IR::Var => R::Var,
                     IR::Std => R::Std,
                     IR::Rank => R::Rank,
+                    IR::ArgMin => R::ArgMin,
+                    IR::ArgMax => R::ArgMax,
                     #[cfg(feature = "moment")]
                     IR::Skew => R::Skew,
                     #[cfg(feature = "moment")]
@@ -894,6 +896,8 @@ pub fn ir_function_to_dsl(input: Vec<Expr>, function: IRFunctionExpr) -> Expr {
                     IR::VarBy => R::VarBy,
                     IR::StdBy => R::StdBy,
                     IR::RankBy => R::RankBy,
+                    IR::ArgMinBy => R::ArgMinBy,
+                    IR::ArgMaxBy => R::ArgMaxBy,
                 },
                 options,
             }

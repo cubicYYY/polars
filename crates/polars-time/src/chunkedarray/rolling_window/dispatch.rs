@@ -5,7 +5,7 @@ use arrow::types::NativeType;
 use num_traits::real::Real;
 use polars_compute::rolling::no_nulls::RollingAggWindowNoNulls;
 use polars_compute::rolling::nulls::RollingAggWindowNulls;
-use polars_compute::rolling::{MeanWindow, SumWindow, no_nulls, nulls};
+use polars_compute::rolling::{ArgMaxWindow, ArgMinWindow, MeanWindow, SumWindow, no_nulls, nulls};
 use polars_core::{with_match_physical_float_polars_type, with_match_physical_numeric_polars_type};
 use polars_ops::series::SeriesMethods;
 use polars_utils::float::IsFloat;
@@ -542,6 +542,126 @@ pub trait SeriesOpsTime: AsSeries {
             });
 
             s
+        })
+    }
+
+    /// Apply a rolling argmin to a Series based on another Series.
+    #[cfg(feature = "rolling_window_by")]
+    fn rolling_argmin_by(
+        &self,
+        by: &Series,
+        options: RollingOptionsDynamicWindow,
+    ) -> PolarsResult<Series> {
+        let s = self.as_series().clone();
+
+        match s.dtype() {
+            DataType::Boolean => return s.cast(&DataType::UInt8)?.rolling_argmin_by(by, options),
+            dt if dt.is_temporal() => return s.to_physical_repr().rolling_argmin_by(by, options),
+            dt => {
+                polars_ensure!(
+                    dt.is_primitive_numeric() && !dt.is_unknown(),
+                    op = "rolling_argmin_by",
+                    dt
+                );
+            },
+        }
+
+        with_match_physical_numeric_polars_type!(s.dtype(), |$T| {
+            let ca: &ChunkedArray<$T> = s.as_ref().as_ref().as_ref();
+            rolling_agg_by::<
+                $T,
+                _,
+                no_nulls::ArgMinWindowNoNulls<_>,
+                nulls::ArgMinWindowNulls<_>
+            >(ca, by, options)
+        })
+    }
+
+    /// Apply a rolling argmax to a Series based on another Series.
+    #[cfg(feature = "rolling_window_by")]
+    fn rolling_argmax_by(
+        &self,
+        by: &Series,
+        options: RollingOptionsDynamicWindow,
+    ) -> PolarsResult<Series> {
+        let s = self.as_series().clone();
+
+        match s.dtype() {
+            DataType::Boolean => return s.cast(&DataType::UInt8)?.rolling_argmax_by(by, options),
+            dt if dt.is_temporal() => return s.to_physical_repr().rolling_argmax_by(by, options),
+            dt => {
+                polars_ensure!(
+                    dt.is_primitive_numeric() && !dt.is_unknown(),
+                    op = "rolling_argmax_by",
+                    dt
+                );
+            },
+        }
+
+        with_match_physical_numeric_polars_type!(s.dtype(), |$T| {
+            let ca: &ChunkedArray<$T> = s.as_ref().as_ref().as_ref();
+            rolling_agg_by::<
+                $T,
+                _,
+                no_nulls::ArgMaxWindowNoNulls<_>,
+                nulls::ArgMaxWindowNulls<_>
+            >(ca, by, options)
+        })
+    }
+
+    /// Apply a rolling argmin to a Series.
+    #[cfg(feature = "rolling_window")]
+    fn rolling_argmin(&self, options: RollingOptionsFixedWindow) -> PolarsResult<Series> {
+        let s = self.as_series();
+
+        match s.dtype() {
+            DataType::Boolean => return s.cast(&DataType::UInt8)?.rolling_argmin(options),
+            dt if dt.is_temporal() => return s.to_physical_repr().rolling_argmin(options),
+            dt => {
+                polars_ensure!(
+                    dt.is_primitive_numeric() && !dt.is_unknown(),
+                    op = "rolling_argmin",
+                    dt
+                );
+            },
+        }
+
+        with_match_physical_numeric_polars_type!(s.dtype(), |$T| {
+            let ca: &ChunkedArray<$T> = s.as_ref().as_ref().as_ref();
+            rolling_agg(
+                ca,
+                options,
+                &rolling::no_nulls::rolling_argmin,
+                &rolling::nulls::rolling_argmin,
+            )
+        })
+    }
+
+    /// Apply a rolling argmax to a Series.
+    #[cfg(feature = "rolling_window")]
+    fn rolling_argmax(&self, options: RollingOptionsFixedWindow) -> PolarsResult<Series> {
+        let s = self.as_series();
+
+        match s.dtype() {
+            DataType::Boolean => return s.cast(&DataType::UInt8)?.rolling_argmax(options),
+            dt if dt.is_temporal() => return s.to_physical_repr().rolling_argmax(options),
+            dt => {
+                polars_ensure!(
+                    dt.is_primitive_numeric() && !dt.is_unknown(),
+                    op = "rolling_argmax",
+                    dt
+                );
+            },
+        }
+
+        with_match_physical_numeric_polars_type!(s.dtype(), |$T| {
+            let ca: &ChunkedArray<$T> = s.as_ref().as_ref().as_ref();
+            rolling_agg(
+                ca,
+                options,
+                &rolling::no_nulls::rolling_argmax,
+                &rolling::nulls::rolling_argmax,
+            )
         })
     }
 

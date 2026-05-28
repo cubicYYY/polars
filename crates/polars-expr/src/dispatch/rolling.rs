@@ -93,6 +93,24 @@ pub(super) fn rolling_rank(s: &Column, options: RollingOptionsFixedWindow) -> Po
         .map(Column::from)
 }
 
+pub(super) fn rolling_argmin(
+    s: &Column,
+    options: RollingOptionsFixedWindow,
+) -> PolarsResult<Column> {
+    s.as_materialized_series()
+        .rolling_argmin(options)
+        .map(Column::from)
+}
+
+pub(super) fn rolling_argmax(
+    s: &Column,
+    options: RollingOptionsFixedWindow,
+) -> PolarsResult<Column> {
+    s.as_materialized_series()
+        .rolling_argmax(options)
+        .map(Column::from)
+}
+
 #[cfg(feature = "moment")]
 pub(super) fn rolling_skew(s: &Column, options: RollingOptionsFixedWindow) -> PolarsResult<Column> {
     // @scalar-opt

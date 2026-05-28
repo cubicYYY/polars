@@ -10,8 +10,6 @@ use super::RollingFnParams;
 use super::no_nulls::RollingAggWindowNoNulls;
 use super::nulls::RollingAggWindowNulls;
 
-// Algorithm: https://cs.stackexchange.com/questions/120915/interview-question-with-arrays-and-consecutive-subintervals/120936#120936
-// Modified to return the argmin/argmax instead of the value:
 pub struct ArgMinMaxWindow<'a, T, P> {
     pub(crate) values: &'a [T],
     validity: Option<&'a Bitmap>,
@@ -173,3 +171,133 @@ impl<T: NativeType, P: MinMaxPolicy> RollingAggWindowNoNulls<T, IdxSize>
 
 pub type ArgMinWindow<'a, T> = ArgMinMaxWindow<'a, T, MinPropagateNan>;
 pub type ArgMaxWindow<'a, T> = ArgMinMaxWindow<'a, T, MaxPropagateNan>;
+
+
+#[cfg(test)]
+mod test {
+    use arrow::array::PrimitiveArray;
+    use arrow::bitmap::Bitmap;
+    use polars_utils::IdxSize;
+
+    use super::*;
+    use crate::rolling::no_nulls::rolling_apply_agg_window;
+    use crate::rolling::nulls::rolling_apply_agg_window as rolling_apply_agg_window_nulls;
+    use crate::rolling::{det_offsets, det_offsets_center};
+
+    fn rolling_argmax_no_nulls(values: &[f64], window_size: usize, min_periods: usize, center: bool) -> Vec<Option<IdxSize>> {
+        let offset_fn = if center { det_offsets_center } else { det_offsets };
+        let out = rolling_apply_agg_window::<ArgMaxWindow<f64>, _, _, _>(
+            values, window_size, min_periods, offset_fn, None,
+        ).unwrap();
+        let arr = out.as_any().downcast_ref::<PrimitiveArray<IdxSize>>().unwrap();
+        arr.into_iter().map(|v| v.copied()).collect()
+    }
+
+    fn rolling_argmin_no_nulls(values: &[f64], window_size: usize, min_periods: usize, center: bool) -> Vec<Option<IdxSize>> {
+        let offset_fn = if center { det_offsets_center } else { det_offsets };
+        let out = rolling_apply_agg_window::<ArgMinWindow<f64>, _, _, _>(
+            values, window_size, min_periods, offset_fn, None,
+        ).unwrap();
+        let arr = out.as_any().downcast_ref::<PrimitiveArray<IdxSize>>().unwrap();
+        arr.into_iter().map(|v| v.copied()).collect()
+    }
+
+    fn rolling_argmax_nulls(values: &[f64], validity: &Bitmap, window_size: usize, min_periods: usize, center: bool) -> Vec<Option<IdxSize>> {
+        let offset_fn = if center { det_offsets_center } else { det_offsets };
+        let out = rolling_apply_agg_window_nulls::<ArgMaxWindow<f64>, _, _, _>(
+            values, validity, window_size, min_periods, offset_fn, None,
+        );
+        let arr = out.as_any().downcast_ref::<PrimitiveArray<IdxSize>>().unwrap();
+        arr.into_iter().map(|v| v.copied()).collect()
+    }
+
+    #[test]
+    fn test_rolling_argmax_basic() {
+        let values = &[1.0, 5.0, 3.0, 4.0, 2.0];
+        let out = rolling_argmax_no_nulls(values, 3, 3, false);
+        assert_eq!(out, &[None, None, Some(1), Some(0), Some(1)]);
+    }
+
+    #[test]
+    fn test_rolling_argmin_basic() {
+        let values = &[1.0, 5.0, 3.0, 4.0, 2.0];
+        let out = rolling_argmin_no_nulls(values, 3, 3, false);
+        assert_eq!(out, &[None, None, Some(0), Some(1), Some(2)]);
+    }
+
+    #[test]
+    fn test_rolling_argmax_min_periods_1() {
+        let values = &[1.0, 5.0, 3.0, 4.0, 2.0];
+        let out = rolling_argmax_no_nulls(values, 3, 1, false);
+        assert_eq!(out, &[Some(0), Some(1), Some(1), Some(0), Some(1)]);
+    }
+
+    #[test]
+    fn test_rolling_argmax_centered() {
+        let values = &[1.0, 5.0, 3.0, 4.0, 2.0];
+        let out = rolling_argmax_no_nulls(values, 3, 1, true);
+        assert_eq!(out, &[Some(1), Some(1), Some(0), Some(1), Some(0)]);
+    }
+
+    #[test]
+    fn test_rolling_argmax_all_equal() {
+        let values = &[3.0, 3.0, 3.0, 3.0, 3.0];
+        let out = rolling_argmax_no_nulls(values, 3, 3, false);
+        assert_eq!(out, &[None, None, Some(0), Some(0), Some(0)]);
+    }
+
+    #[test]
+    fn test_rolling_argmax_nan_propagation() {
+        let values = &[1.0, f64::NAN, 3.0];
+        let out = rolling_argmax_no_nulls(values, 3, 3, false);
+        assert_eq!(out, &[None, None, Some(1)]);
+    }
+
+    #[test]
+    fn test_rolling_argmax_with_nulls() {
+        let values = &[1.0, 0.0, 3.0, 2.0];
+        let validity = Bitmap::from(&[true, false, true, true]);
+        let out = rolling_argmax_nulls(values, &validity, 3, 2, false);
+        assert_eq!(out, &[None, None, Some(2), Some(1)]);
+    }
+
+    #[test]
+    fn test_rolling_argmin_with_nulls() {
+        let values = &[1.0, 0.0, 3.0, 2.0];
+        let validity = Bitmap::from(&[true, false, true, true]);
+        let out = rolling_argmax_nulls(values, &validity, 3, 2, false);
+        assert_eq!(out, &[None, None, Some(2), Some(1)]);
+    }
+
+    #[test]
+    fn test_rolling_argmax_consistent_with_rolling_max() {
+        use crate::rolling::min_max::MinMaxWindow;
+        use polars_utils::min_max::MaxPropagateNan;
+
+        let values = &[2.0, 7.0, 1.0, 8.0, 3.0, 6.0, 4.0, 9.0, 5.0, 0.0];
+        let window_size = 4;
+        let offset_fn = det_offsets;
+
+        let argmax_out = rolling_apply_agg_window::<ArgMaxWindow<f64>, _, _, _>(
+            values, window_size, window_size, offset_fn, None,
+        ).unwrap();
+        let argmax_arr = argmax_out.as_any().downcast_ref::<PrimitiveArray<IdxSize>>().unwrap();
+        let argmax_vec: Vec<_> = argmax_arr.into_iter().map(|v| v.copied()).collect();
+
+        let max_out = rolling_apply_agg_window::<MinMaxWindow<f64, MaxPropagateNan>, _, _, _>(
+            values, window_size, window_size, offset_fn, None,
+        ).unwrap();
+        let max_arr = max_out.as_any().downcast_ref::<PrimitiveArray<f64>>().unwrap();
+        let max_vec: Vec<_> = max_arr.into_iter().map(|v| v.copied()).collect();
+
+        for idx in 0..values.len() {
+            let (start, _end) = offset_fn(idx, window_size, values.len());
+            if let (Some(argmax_idx), Some(max_val)) = (argmax_vec[idx], max_vec[idx]) {
+                let actual = values[start + argmax_idx as usize];
+                assert_eq!(actual, max_val,
+                    "at idx={idx}: values[{} + {}] = {} != rolling_max = {}",
+                    start, argmax_idx, actual, max_val);
+            }
+        }
+    }
+}

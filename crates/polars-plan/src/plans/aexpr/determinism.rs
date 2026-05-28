@@ -341,7 +341,7 @@ fn is_inherently_nondeterministic_list_fn(f: &IRListFunction) -> bool {
 fn is_inherently_nondeterministic_rolling_fn(f: &IRRollingFunction) -> bool {
     use IRRollingFunction as R;
     match f {
-        R::Min | R::Max | R::Mean | R::Sum | R::Quantile | R::Var | R::Std | R::Rank => false,
+        R::Min | R::Max | R::Mean | R::Sum | R::Quantile | R::Var | R::Std | R::Rank | R::ArgMin | R::ArgMax => false,
         #[cfg(feature = "moment")]
         R::Skew | R::Kurtosis => false,
         #[cfg(feature = "cov")]

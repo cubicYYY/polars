@@ -224,6 +224,8 @@ pub fn function_expr_to_udf(func: IRFunctionExpr) -> SpecialEq<Arc<dyn ColumnsUd
                 Var => map!(rolling::rolling_var, options.clone()),
                 Std => map!(rolling::rolling_std, options.clone()),
                 Rank => map!(rolling::rolling_rank, options.clone()),
+                ArgMin => map!(rolling::rolling_argmin, options.clone()),
+                ArgMax => map!(rolling::rolling_argmax, options.clone()),
                 #[cfg(feature = "moment")]
                 Skew => map!(rolling::rolling_skew, options.clone()),
                 #[cfg(feature = "moment")]
@@ -263,6 +265,8 @@ pub fn function_expr_to_udf(func: IRFunctionExpr) -> SpecialEq<Arc<dyn ColumnsUd
                 VarBy => map_as_slice!(rolling_by::rolling_var_by, options.clone()),
                 StdBy => map_as_slice!(rolling_by::rolling_std_by, options.clone()),
                 RankBy => map_as_slice!(rolling_by::rolling_rank_by, options.clone()),
+                ArgMinBy => map_as_slice!(rolling_by::rolling_argmin_by, options.clone()),
+                ArgMaxBy => map_as_slice!(rolling_by::rolling_argmax_by, options.clone()),
             }
         },
         #[cfg(feature = "hist")]

@@ -280,3 +280,133 @@ fn test_rolling_var() {
         "{out:?} is not approximately equal to {exp_res:?}"
     );
 }
+
+#[test]
+fn test_rolling_argmin_argmax() {
+    let s = Int32Chunked::new("foo".into(), &[1, 5, 3, 4, 2]).into_series();
+
+    // rolling_argmax, window=3, min_periods=3
+    let a = s
+        .rolling_argmax(RollingOptionsFixedWindow {
+            window_size: 3,
+            min_periods: 3,
+            ..Default::default()
+        })
+        .unwrap();
+    let a = a.idx().unwrap();
+    assert_eq!(
+        Vec::from(a),
+        &[None, None, Some(1), Some(0), Some(1)]
+    );
+
+    // rolling_argmin, window=3, min_periods=3
+    let a = s
+        .rolling_argmin(RollingOptionsFixedWindow {
+            window_size: 3,
+            min_periods: 3,
+            ..Default::default()
+        })
+        .unwrap();
+    let a = a.idx().unwrap();
+    assert_eq!(
+        Vec::from(a),
+        &[None, None, Some(0), Some(1), Some(2)]
+    );
+}
+
+#[test]
+fn test_rolling_argmax_min_periods() {
+    let s = Int32Chunked::new("foo".into(), &[1, 5, 3, 4, 2]).into_series();
+
+    // rolling_argmax, window=3, min_periods=1
+    let a = s
+        .rolling_argmax(RollingOptionsFixedWindow {
+            window_size: 3,
+            min_periods: 1,
+            ..Default::default()
+        })
+        .unwrap();
+    let a = a.idx().unwrap();
+    assert_eq!(
+        Vec::from(a),
+        &[Some(0), Some(1), Some(1), Some(0), Some(1)]
+    );
+}
+
+#[test]
+fn test_rolling_argmax_centered() {
+    let s = Float64Chunked::from_slice("foo".into(), &[1.0, 5.0, 3.0, 4.0, 2.0]).into_series();
+
+    let a = s
+        .rolling_argmax(RollingOptionsFixedWindow {
+            window_size: 3,
+            min_periods: 1,
+            center: true,
+            ..Default::default()
+        })
+        .unwrap();
+    let a = a.idx().unwrap();
+    assert_eq!(
+        Vec::from(a),
+        &[Some(1), Some(1), Some(0), Some(1), Some(0)]
+    );
+}
+
+#[test]
+fn test_rolling_argmax_with_nulls() {
+    let s = Float64Chunked::new(
+        "foo".into(),
+        &[Some(1.0), None, Some(3.0), Some(2.0), Some(5.0)],
+    )
+    .into_series();
+
+    let a = s
+        .rolling_argmax(RollingOptionsFixedWindow {
+            window_size: 3,
+            min_periods: 2,
+            ..Default::default()
+        })
+        .unwrap();
+    let a = a.idx().unwrap();
+    // window[0..3] = [1.0, null, 3.0], valid=[1.0, 3.0] -> argmax=2 (3.0 at pos 2)
+    // window[1..4] = [null, 3.0, 2.0], valid=[3.0, 2.0] -> argmax=1 (3.0 at pos 1)
+    // window[2..5] = [3.0, 2.0, 5.0], valid=[3.0, 2.0, 5.0] -> argmax=2 (5.0 at pos 2)
+    assert_eq!(
+        Vec::from(a),
+        &[None, None, Some(2), Some(1), Some(2)]
+    );
+}
+
+#[test]
+fn test_rolling_argmin_argmax_consistency() {
+    // Verify that values[start + argmax] == rolling_max
+    let s = Float64Chunked::from_slice(
+        "foo".into(),
+        &[2.0, 7.0, 1.0, 8.0, 3.0, 6.0, 4.0, 9.0, 5.0, 0.0],
+    )
+    .into_series();
+
+    let options = RollingOptionsFixedWindow {
+        window_size: 4,
+        min_periods: 4,
+        ..Default::default()
+    };
+
+    let argmax = s.rolling_argmax(options.clone()).unwrap();
+    let max_val = s.rolling_max(options).unwrap();
+
+    let argmax_idx = argmax.idx().unwrap();
+    let max_f64 = max_val.f64().unwrap();
+    let values = [2.0, 7.0, 1.0, 8.0, 3.0, 6.0, 4.0, 9.0, 5.0, 0.0];
+
+    for i in 0..values.len() {
+        if let (Some(idx), Some(expected_max)) = (argmax_idx.get(i), max_f64.get(i)) {
+            let window_start = i.saturating_sub(3); // window_size - 1
+            let actual = values[window_start + idx as usize];
+            assert_eq!(
+                actual, expected_max,
+                "at i={i}: values[{window_start} + {idx}] = {actual} != rolling_max = {expected_max}"
+            );
+        }
+    }
+}

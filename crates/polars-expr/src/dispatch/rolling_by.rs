@@ -104,3 +104,21 @@ pub(super) fn rolling_rank_by(
         .rolling_rank_by(s[1].as_materialized_series(), options)
         .map(Column::from)
 }
+
+pub(super) fn rolling_argmin_by(
+    s: &[Column],
+    options: RollingOptionsDynamicWindow,
+) -> PolarsResult<Column> {
+    s[0].as_materialized_series()
+        .rolling_argmin_by(s[1].as_materialized_series(), options)
+        .map(Column::from)
+}
+
+pub(super) fn rolling_argmax_by(
+    s: &[Column],
+    options: RollingOptionsDynamicWindow,
+) -> PolarsResult<Column> {
+    s[0].as_materialized_series()
+        .rolling_argmax_by(s[1].as_materialized_series(), options)
+        .map(Column::from)
+}

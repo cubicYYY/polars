@@ -7,6 +7,7 @@ use arrow::legacy::utils::CustomIterTools;
 use arrow::types::NativeType;
 use num_traits::{Float, Num, NumCast};
 
+mod arg_min_max;
 mod mean;
 mod min_max;
 mod moment;
@@ -14,6 +15,7 @@ mod quantile;
 pub mod rank;
 mod sum;
 
+pub use arg_min_max::*;
 pub use mean::*;
 pub use min_max::*;
 pub use moment::*;

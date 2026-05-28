@@ -1250,6 +1250,12 @@ pub(crate) fn into_py(py: Python<'_>, expr: &AExpr) -> PyResult<Py<PyAny>> {
                     IRRollingFunctionBy::RankBy => {
                         return Err(PyNotImplementedError::new_err("rolling rank by"));
                     },
+                    IRRollingFunctionBy::ArgMinBy => {
+                        return Err(PyNotImplementedError::new_err("rolling argmin by"));
+                    },
+                    IRRollingFunctionBy::ArgMaxBy => {
+                        return Err(PyNotImplementedError::new_err("rolling argmax by"));
+                    },
                 },
                 IRFunctionExpr::Rechunk => ("rechunk",).into_py_any(py),
                 IRFunctionExpr::ShiftAndFill => ("shift_and_fill",).into_py_any(py),

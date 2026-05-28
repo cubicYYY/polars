@@ -369,6 +369,88 @@ impl PyExpr {
         Ok(self.inner.clone().rolling_rank_by(by.inner, options).into())
     }
 
+    #[pyo3(signature = (window_size, min_samples, center))]
+    fn rolling_argmin(
+        &self,
+        window_size: usize,
+        min_samples: Option<usize>,
+        center: bool,
+    ) -> Self {
+        let min_samples = min_samples.unwrap_or(window_size);
+        let options = RollingOptionsFixedWindow {
+            window_size,
+            min_periods: min_samples,
+            weights: None,
+            center,
+            ..Default::default()
+        };
+
+        self.inner.clone().rolling_argmin(options).into()
+    }
+
+    #[pyo3(signature = (by, window_size, min_samples, closed))]
+    fn rolling_argmin_by(
+        &self,
+        by: PyExpr,
+        window_size: &str,
+        min_samples: usize,
+        closed: Wrap<ClosedWindow>,
+    ) -> PyResult<Self> {
+        let options = RollingOptionsDynamicWindow {
+            window_size: Duration::try_parse(window_size).map_err(PyPolarsErr::from)?,
+            min_periods: min_samples,
+            closed_window: closed.0,
+            fn_params: None,
+        };
+
+        Ok(self
+            .inner
+            .clone()
+            .rolling_argmin_by(by.inner, options)
+            .into())
+    }
+
+    #[pyo3(signature = (window_size, min_samples, center))]
+    fn rolling_argmax(
+        &self,
+        window_size: usize,
+        min_samples: Option<usize>,
+        center: bool,
+    ) -> Self {
+        let min_samples = min_samples.unwrap_or(window_size);
+        let options = RollingOptionsFixedWindow {
+            window_size,
+            min_periods: min_samples,
+            weights: None,
+            center,
+            ..Default::default()
+        };
+
+        self.inner.clone().rolling_argmax(options).into()
+    }
+
+    #[pyo3(signature = (by, window_size, min_samples, closed))]
+    fn rolling_argmax_by(
+        &self,
+        by: PyExpr,
+        window_size: &str,
+        min_samples: usize,
+        closed: Wrap<ClosedWindow>,
+    ) -> PyResult<Self> {
+        let options = RollingOptionsDynamicWindow {
+            window_size: Duration::try_parse(window_size).map_err(PyPolarsErr::from)?,
+            min_periods: min_samples,
+            closed_window: closed.0,
+            fn_params: None,
+        };
+
+        Ok(self
+            .inner
+            .clone()
+            .rolling_argmax_by(by.inner, options)
+            .into())
+    }
+
     #[pyo3(signature = (window_size, bias, min_periods, center))]
     fn rolling_skew(
         &self,

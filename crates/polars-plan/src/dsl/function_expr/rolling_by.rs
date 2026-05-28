@@ -12,6 +12,8 @@ pub enum RollingFunctionBy {
     VarBy,
     StdBy,
     RankBy,
+    ArgMinBy,
+    ArgMaxBy,
 }
 
 impl Display for RollingFunctionBy {
@@ -27,6 +29,8 @@ impl Display for RollingFunctionBy {
             VarBy => "rolling_var_by",
             StdBy => "rolling_std_by",
             RankBy => "rolling_rank_by",
+            ArgMinBy => "rolling_argmin_by",
+            ArgMaxBy => "rolling_argmax_by",
         };
 
         write!(f, "{name}")

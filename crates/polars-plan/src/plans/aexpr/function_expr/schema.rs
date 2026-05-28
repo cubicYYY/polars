@@ -68,6 +68,7 @@ impl IRFunctionExpr {
                     Mean | Quantile | Std => mapper.moment_dtype(),
                     Var => mapper.var_dtype(),
                     Sum => mapper.sum_dtype(),
+                    ArgMin | ArgMax => mapper.with_dtype(IDX_DTYPE),
                     Rank => match options.fn_params {
                         Some(RollingFnParams::Rank {
                             method: RollingRankMethod::Average,
@@ -112,6 +113,7 @@ impl IRFunctionExpr {
                     MeanBy | QuantileBy | StdBy => mapper.moment_dtype(),
                     VarBy => mapper.var_dtype(),
                     SumBy => mapper.sum_dtype(),
+                    ArgMinBy | ArgMaxBy => mapper.with_dtype(IDX_DTYPE),
                     RankBy => match options.fn_params {
                         Some(RollingFnParams::Rank {
                             method: RollingRankMethod::Average,

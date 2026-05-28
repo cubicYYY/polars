@@ -11,6 +11,8 @@ pub enum IRRollingFunction {
     Var,
     Std,
     Rank,
+    ArgMin,
+    ArgMax,
     #[cfg(feature = "moment")]
     Skew,
     #[cfg(feature = "moment")]
@@ -37,6 +39,8 @@ impl Display for IRRollingFunction {
             Var => "var",
             Std => "std",
             Rank => "rank",
+            ArgMin => "argmin",
+            ArgMax => "argmax",
             #[cfg(feature = "moment")]
             Skew => "skew",
             #[cfg(feature = "moment")]
