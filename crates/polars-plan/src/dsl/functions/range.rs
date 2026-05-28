@@ -67,13 +67,45 @@ pub fn date_range(
 
 #[cfg(feature = "dtype-date")]
 /// Create a column of date ranges from `start`, `end`, `interval`, and `num_samples` expressions.
+///
+/// If `interval_expr` is provided (and `interval` is `None`), the interval is treated as a
+/// per-row expression (String column containing duration strings like "1d", "2w", etc.).
 pub fn date_ranges(
     start: Option<Expr>,
     end: Option<Expr>,
     interval: Option<Duration>,
+    interval_expr: Option<Expr>,
     num_samples: Option<Expr>,
     closed: ClosedWindow,
 ) -> PolarsResult<Expr> {
+    // When interval_expr is provided, treat as StartEndInterval with interval=None
+    // and push the interval expression as 3rd input.
+    if interval.is_none() && interval_expr.is_some() {
+        let start =
+            start.ok_or_else(|| polars_err!(InvalidOperation: "'start' must be provided when 'interval' is an expression."))?;
+        let end =
+            end.ok_or_else(|| polars_err!(InvalidOperation: "'end' must be provided when 'interval' is an expression."))?;
+
+        let input = vec![start, end, interval_expr.unwrap()];
+        let arg_type = DateRangeArgs::StartEndInterval;
+
+        // Only "both" is supported for date_ranges(start, end, num_samples).
+        polars_ensure!(
+            !(arg_type == DateRangeArgs::StartEndSamples && closed != ClosedWindow::Both),
+            InvalidOperation: "date_range does not support 'left', 'right', or 'none' for the \
+                'closed' parameter when 'start', 'end', and 'num_samples' is provided.",
+        );
+
+        return Ok(Expr::n_ary(
+            RangeFunction::DateRanges {
+                interval: None,
+                closed,
+                arg_type,
+            },
+            input,
+        ));
+    }
+
     let (input, arg_type) = DateRangeArgs::parse(start, end, interval, num_samples)?;
 
     polars_ensure!(
@@ -123,16 +155,43 @@ pub fn datetime_range(
 }
 
 /// Create a column of datetime ranges from `start`, `end`, `interval`, and `num_samples` expressions.
+///
+/// If `interval_expr` is provided (and `interval` is `None`), the interval is treated as a
+/// per-row expression (String column containing duration strings like "1d", "2h", etc.).
 #[cfg(feature = "dtype-datetime")]
 pub fn datetime_ranges(
     start: Option<Expr>,
     end: Option<Expr>,
     interval: Option<Duration>,
+    interval_expr: Option<Expr>,
     num_samples: Option<Expr>,
     closed: ClosedWindow,
     time_unit: Option<TimeUnit>,
     time_zone: Option<TimeZone>,
 ) -> PolarsResult<Expr> {
+    // When interval_expr is provided, treat as StartEndInterval with interval=None
+    // and push the interval expression as 3rd input.
+    if interval.is_none() && interval_expr.is_some() {
+        let start =
+            start.ok_or_else(|| polars_err!(InvalidOperation: "'start' must be provided when 'interval' is an expression."))?;
+        let end =
+            end.ok_or_else(|| polars_err!(InvalidOperation: "'end' must be provided when 'interval' is an expression."))?;
+
+        let input = vec![start, end, interval_expr.unwrap()];
+        let arg_type = DateRangeArgs::StartEndInterval;
+
+        return Ok(Expr::n_ary(
+            RangeFunction::DatetimeRanges {
+                interval: None,
+                closed,
+                time_unit,
+                time_zone,
+                arg_type,
+            },
+            input,
+        ));
+    }
+
     let (input, arg_type) = DateRangeArgs::parse(start, end, interval, num_samples)?;
     Ok(Expr::n_ary(
         RangeFunction::DatetimeRanges {

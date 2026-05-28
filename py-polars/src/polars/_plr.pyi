@@ -2307,7 +2307,7 @@ def date_range(
     start: PyExpr, end: PyExpr, interval: str, closed: ClosedWindow
 ) -> PyExpr: ...
 def date_ranges(
-    start: PyExpr, end: PyExpr, interval: str, closed: ClosedWindow
+    start: PyExpr, end: PyExpr, interval: str | PyExpr, closed: ClosedWindow
 ) -> PyExpr: ...
 def datetime_range(
     start: PyExpr,
@@ -2320,7 +2320,7 @@ def datetime_range(
 def datetime_ranges(
     start: PyExpr,
     end: PyExpr,
-    every: str,
+    every: str | PyExpr,
     closed: ClosedWindow,
     time_unit: TimeUnit | None,
     time_zone: TimeZone | None,

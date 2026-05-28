@@ -1,6 +1,6 @@
 use polars_core::prelude::{
     ChunkedArray, Column, Int64Chunked, IntoColumn, ListBuilderTrait, ListPrimitiveChunkedBuilder,
-    PolarsIntegerType, PolarsNumericType, PolarsResult, polars_bail, polars_ensure,
+    PolarsIntegerType, PolarsNumericType, PolarsResult, StringChunked, polars_bail, polars_ensure,
 };
 
 pub(super) fn temporal_series_to_i64_scalar(s: &Column) -> Option<i64> {
@@ -253,4 +253,158 @@ where
     for _ in 0..n {
         builder.append_null()
     }
+}
+
+/// Create a ranges column from the given start/end columns and a per-row interval column (String).
+/// The `range_impl` function receives start, end, and the interval string for each row.
+pub(super) fn temporal_ranges_impl_broadcast_with_interval<T, U, F>(
+    start: &ChunkedArray<T>,
+    end: &ChunkedArray<T>,
+    interval: &StringChunked,
+    range_impl: F,
+    builder: &mut ListPrimitiveChunkedBuilder<U>,
+) -> PolarsResult<Column>
+where
+    T: PolarsIntegerType,
+    U: PolarsIntegerType,
+    F: Fn(T::Native, T::Native, &str, &mut ListPrimitiveChunkedBuilder<U>) -> PolarsResult<()>,
+    ListPrimitiveChunkedBuilder<U>: ListBuilderTrait,
+{
+    match (start.len(), end.len(), interval.len()) {
+        (len_start, len_end, len_interval)
+            if len_start == len_end && len_start == len_interval =>
+        {
+            build_temporal_ranges_with_interval::<_, _, _, T, U, F>(
+                start.downcast_iter().flatten(),
+                end.downcast_iter().flatten(),
+                interval.downcast_iter().flatten(),
+                range_impl,
+                builder,
+            )?;
+        },
+        (1, len_end, len_interval) if len_end == len_interval => {
+            let start_scalar = start.get(0);
+            match start_scalar {
+                Some(start) => build_temporal_ranges_with_interval::<_, _, _, T, U, F>(
+                    std::iter::repeat(Some(&start)),
+                    end.downcast_iter().flatten(),
+                    interval.downcast_iter().flatten(),
+                    range_impl,
+                    builder,
+                )?,
+                None => build_nulls(builder, len_end),
+            }
+        },
+        (len_start, 1, len_interval) if len_start == len_interval => {
+            let end_scalar = end.get(0);
+            match end_scalar {
+                Some(end) => build_temporal_ranges_with_interval::<_, _, _, T, U, F>(
+                    start.downcast_iter().flatten(),
+                    std::iter::repeat(Some(&end)),
+                    interval.downcast_iter().flatten(),
+                    range_impl,
+                    builder,
+                )?,
+                None => build_nulls(builder, len_start),
+            }
+        },
+        (len_start, len_end, 1) if len_start == len_end => {
+            let interval_scalar = interval.get(0);
+            match interval_scalar {
+                Some(interval_str) => build_temporal_ranges_with_interval::<_, _, _, T, U, F>(
+                    start.downcast_iter().flatten(),
+                    end.downcast_iter().flatten(),
+                    std::iter::repeat(Some(interval_str)),
+                    range_impl,
+                    builder,
+                )?,
+                None => build_nulls(builder, len_start),
+            }
+        },
+        (1, 1, len_interval) => {
+            let start_scalar = start.get(0);
+            let end_scalar = end.get(0);
+            match (start_scalar, end_scalar) {
+                (Some(start), Some(end)) => {
+                    build_temporal_ranges_with_interval::<_, _, _, T, U, F>(
+                        std::iter::repeat(Some(&start)),
+                        std::iter::repeat(Some(&end)),
+                        interval.downcast_iter().flatten(),
+                        range_impl,
+                        builder,
+                    )?
+                },
+                _ => build_nulls(builder, len_interval),
+            }
+        },
+        (1, len_end, 1) => {
+            let start_scalar = start.get(0);
+            let interval_scalar = interval.get(0);
+            match (start_scalar, interval_scalar) {
+                (Some(start), Some(interval_str)) => {
+                    build_temporal_ranges_with_interval::<_, _, _, T, U, F>(
+                        std::iter::repeat(Some(&start)),
+                        end.downcast_iter().flatten(),
+                        std::iter::repeat(Some(interval_str)),
+                        range_impl,
+                        builder,
+                    )?
+                },
+                _ => build_nulls(builder, len_end),
+            }
+        },
+        (len_start, 1, 1) => {
+            let end_scalar = end.get(0);
+            let interval_scalar = interval.get(0);
+            match (end_scalar, interval_scalar) {
+                (Some(end), Some(interval_str)) => {
+                    build_temporal_ranges_with_interval::<_, _, _, T, U, F>(
+                        start.downcast_iter().flatten(),
+                        std::iter::repeat(Some(&end)),
+                        std::iter::repeat(Some(interval_str)),
+                        range_impl,
+                        builder,
+                    )?
+                },
+                _ => build_nulls(builder, len_start),
+            }
+        },
+        (len_start, len_end, len_interval) => {
+            polars_bail!(
+                ComputeError:
+                "lengths of `start` ({}), `end` ({}) and `interval` ({}) do not match",
+                len_start, len_end, len_interval
+            )
+        },
+    };
+    let out = builder.finish().into_column();
+    Ok(out)
+}
+
+/// Iterate over start, end, and interval columns and create a range for each entry.
+fn build_temporal_ranges_with_interval<'a, I, J, K, T, U, F>(
+    start: I,
+    end: J,
+    interval: K,
+    range_impl: F,
+    builder: &mut ListPrimitiveChunkedBuilder<U>,
+) -> PolarsResult<()>
+where
+    I: Iterator<Item = Option<&'a T::Native>>,
+    J: Iterator<Item = Option<&'a T::Native>>,
+    K: Iterator<Item = Option<&'a str>>,
+    T: PolarsIntegerType,
+    U: PolarsIntegerType,
+    F: Fn(T::Native, T::Native, &str, &mut ListPrimitiveChunkedBuilder<U>) -> PolarsResult<()>,
+    ListPrimitiveChunkedBuilder<U>: ListBuilderTrait,
+{
+    for ((start, end), interval) in start.zip(end).zip(interval) {
+        match (start, end, interval) {
+            (Some(start), Some(end), Some(interval)) => {
+                range_impl(*start, *end, interval, builder)?
+            },
+            _ => builder.append_null(),
+        }
+    }
+    Ok(())
 }

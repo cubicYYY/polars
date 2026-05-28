@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import contextlib
-from typing import TYPE_CHECKING, overload
+from datetime import timedelta
+from typing import TYPE_CHECKING, Any, overload
 
 from polars import functions as F
 from polars._utils.parse import parse_into_expression
@@ -12,11 +13,31 @@ with contextlib.suppress(ImportError):  # Module not available when building doc
     import polars._plr as plr
 
 if TYPE_CHECKING:
-    from datetime import date, datetime, timedelta
+    from datetime import date, datetime
     from typing import Literal
 
     from polars import Expr, Series
-    from polars._typing import ClosedInterval, IntoExprColumn
+    from polars._typing import ClosedInterval, IntoExpr, IntoExprColumn
+
+
+def _parse_interval_or_expr(interval: str | timedelta | IntoExprColumn) -> Any:
+    """Parse the interval argument as either a duration string or a PyExpr.
+
+    Returns either a `str` (for literal intervals) or a `PyExpr` (for expression-based intervals).
+    The Rust binding accepts both via `&Bound<'_, PyAny>`.
+
+    For strings: if it looks like a duration (starts with a digit or '-'), treat as literal.
+    Otherwise treat as a column name.
+    """
+    if isinstance(interval, timedelta):
+        return parse_interval_argument(interval)
+    if isinstance(interval, str):
+        if interval and (interval[0].isdigit() or interval[0] == "-"):
+            return parse_interval_argument(interval)
+        # Doesn't look like a duration — treat as column name
+        return parse_into_expression(interval)
+    # Expr or Series
+    return parse_into_expression(interval)
 
 
 @overload
@@ -187,7 +208,7 @@ def date_range(
 def date_ranges(
     start: date | datetime | IntoExprColumn,
     end: date | datetime | IntoExprColumn,
-    interval: str | timedelta = ...,
+    interval: str | timedelta | IntoExprColumn = ...,
     *,
     closed: ClosedInterval = ...,
     eager: Literal[False] = ...,
@@ -198,7 +219,7 @@ def date_ranges(
 def date_ranges(
     start: date | datetime | IntoExprColumn,
     end: date | datetime | IntoExprColumn,
-    interval: str | timedelta = ...,
+    interval: str | timedelta | IntoExprColumn = ...,
     *,
     closed: ClosedInterval = ...,
     eager: Literal[True],
@@ -209,7 +230,7 @@ def date_ranges(
 def date_ranges(
     start: date | datetime | IntoExprColumn,
     end: date | datetime | IntoExprColumn,
-    interval: str | timedelta = ...,
+    interval: str | timedelta | IntoExprColumn = ...,
     *,
     closed: ClosedInterval = ...,
     eager: bool,
@@ -219,7 +240,7 @@ def date_ranges(
 def date_ranges(
     start: date | datetime | IntoExprColumn,
     end: date | datetime | IntoExprColumn,
-    interval: str | timedelta = "1d",
+    interval: str | timedelta | IntoExprColumn = "1d",
     *,
     closed: ClosedInterval = "both",
     eager: bool = False,
@@ -234,9 +255,10 @@ def date_ranges(
     end
         Upper bound of the date range.
     interval
-        Interval of the range periods, specified as a Python `timedelta` object
-        or using the Polars duration string language (see "Notes" section below).
-        Must consist of full days.
+        Interval of the range periods, specified as a Python `timedelta` object,
+        using the Polars duration string language (see "Notes" section below),
+        or as an expression/column name referencing a String column of duration
+        strings. Must consist of full days.
     closed : {'both', 'left', 'right', 'none'}
         Define which sides of the range are closed (inclusive).
     eager
@@ -270,6 +292,10 @@ def date_ranges(
     not be 24 hours, due to daylight savings). Similarly for "calendar week",
     "calendar month", "calendar quarter", and "calendar year".
 
+    When `interval` is a column expression, the duration string is parsed per row.
+    If your data has only a few distinct interval values, consider using
+    `partition_by` with a static interval for better performance.
+
     Examples
     --------
     >>> from datetime import date
@@ -291,11 +317,11 @@ def date_ranges(
     │ 2022-01-02 ┆ 2022-01-03 ┆ [2022-01-02, 2022-01-03]             │
     └────────────┴────────────┴──────────────────────────────────────┘
     """
-    interval = parse_interval_argument(interval)
+    interval_parsed = _parse_interval_or_expr(interval)
     start_pyexpr = parse_into_expression(start)
     end_pyexpr = parse_into_expression(end)
 
-    result = wrap_expr(plr.date_ranges(start_pyexpr, end_pyexpr, interval, closed))
+    result = wrap_expr(plr.date_ranges(start_pyexpr, end_pyexpr, interval_parsed, closed))
 
     if eager:
         return F.select(result).to_series()
