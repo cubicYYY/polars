@@ -6,7 +6,7 @@ use polars_buffer::Buffer;
 use polars_utils::IdxSize;
 use polars_utils::aliases::{InitHashMaps, PlHashMap};
 
-use crate::array::binview::{DEFAULT_BLOCK_SIZE, MAX_EXP_BLOCK_SIZE};
+use crate::array::binview::{DEFAULT_BLOCK_SIZE, MAX_BUFFER_LEN, MAX_EXP_BLOCK_SIZE};
 use crate::array::builder::{ShareStrategy, StaticArrayBuilder};
 use crate::array::{Array, BinaryViewArrayGeneric, View, ViewType};
 use crate::bitmap::OptBitmapBuilder;
@@ -38,7 +38,7 @@ pub struct BinaryViewArrayGenericBuilder<V: ViewType + ?Sized> {
 }
 
 impl<V: ViewType + ?Sized> BinaryViewArrayGenericBuilder<V> {
-    pub const MAX_ROW_BYTE_LEN: usize = (u32::MAX - 1) as _;
+    pub const MAX_ROW_BYTE_LEN: usize = MAX_BUFFER_LEN;
 
     pub fn new(dtype: ArrowDataType) -> Self {
         Self {
@@ -71,7 +71,7 @@ impl<V: ViewType + ?Sized> BinaryViewArrayGenericBuilder<V> {
     fn reserve_active_buffer_slow(&mut self, additional: usize) {
         assert!(
             additional <= Self::MAX_ROW_BYTE_LEN,
-            "strings longer than 2^32 - 2 are not supported"
+            "binary view rows must not exceed i32::MAX bytes (Arrow spec)"
         );
 
         // Allocate a new buffer and flush the old buffer.

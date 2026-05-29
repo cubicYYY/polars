@@ -351,13 +351,19 @@ pub fn decode_plain_generic(
     //    - UTF-8 verification might still use len_below_128 trick, but might need to fall back to
     //      slow path.
 
+    // The Arrow binary view spec stores offsets as signed i32, so the data buffer for this page
+    // must stay within i32::MAX bytes. Pages this large are pathological (and typically rejected
+    // by other parquet readers anyway), so we error out rather than silently producing
+    // non-compliant data.
+    const MAX_BUF_SIZE: usize = i32::MAX as usize;
+
     target.finish_in_progress();
     unsafe { target.views_mut() }.reserve(num_rows);
 
     let start_target_length = target.len();
 
     let buffer_idx = target.completed_buffers().len() as u32;
-    let mut buffer = Vec::with_capacity(values.len() + 1);
+    let mut buffer = Vec::with_capacity((values.len() + 1).min(MAX_BUF_SIZE));
     let mut none_starting_with_continuation_byte = true; // Whether the transition from between strings is valid
     // UTF-8
     let mut all_len_below_128 = true; // Whether all the lengths of the values are below 128, this
@@ -400,12 +406,18 @@ pub fn decode_plain_generic(
             continue;
         }
 
-        let offset = buffer.len() as u32;
-
         if value.len() <= View::MAX_INLINE_SIZE as usize {
             unsafe { target.views_mut() }.push(unsafe { View::new_inline_unchecked(value) });
             num_inlined += 1;
         } else {
+            // Spec: offsets are signed i32, so buffer must stay within i32::MAX bytes.
+            if buffer.len() + value.len() > MAX_BUF_SIZE {
+                return Err(ParquetError::oos(
+                    "Parquet binary-view page exceeds Arrow spec limit (i32::MAX bytes per buffer)",
+                ));
+            }
+
+            let offset = buffer.len() as u32;
             buffer.extend_from_slice(value);
             unsafe { target.views_mut() }
                 .push(unsafe { View::new_noninline_unchecked(value, buffer_idx, offset) });

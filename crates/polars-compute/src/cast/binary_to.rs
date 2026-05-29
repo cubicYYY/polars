@@ -209,7 +209,9 @@ pub fn fixed_size_binary_to_binview(from: &FixedSizeBinaryArray) -> BinaryViewAr
             .unwrap();
     }
 
-    const MAX_BYTES_PER_BUFFER: usize = u32::MAX as usize;
+    // The Arrow binary view layout uses signed i32 offsets, so each data buffer must stay within
+    // i32::MAX bytes for spec-compliant interop with PyArrow / DuckDB / etc.
+    const MAX_BYTES_PER_BUFFER: usize = i32::MAX as usize;
 
     let size = from.size();
     let num_bytes = from.len() * size;

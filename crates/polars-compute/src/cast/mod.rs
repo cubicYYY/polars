@@ -257,9 +257,10 @@ fn cast_list_uint8_to_binary<O: Offset>(list: &ListArray<O>) -> PolarsResult<Bin
 
     let mut all_views_inline = true;
 
-    // In a View for BinaryViewArray, both length and offset are u32.
+    // The Arrow binary view spec requires length and offset to be signed i32, so we cap each
+    // data buffer at i32::MAX bytes to keep the result spec-compliant for interop.
     #[cfg(not(test))]
-    const MAX_BUF_SIZE: usize = u32::MAX as usize;
+    const MAX_BUF_SIZE: usize = i32::MAX as usize;
 
     // This allows us to test some invariants without using 4GB of RAM; see mod
     // tests below.

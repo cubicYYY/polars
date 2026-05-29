@@ -68,17 +68,20 @@ pub fn utf8_to_binary<O: Offset>(from: &Utf8Array<O>, to_dtype: ArrowDataType) -
 }
 
 // Different types to test the overflow path.
+//
+// The Arrow binary view layout requires offsets to fit in a signed i32, so we cap at i32::MAX
+// here to keep the zero-copy result spec-compliant for interop with PyArrow, DuckDB, etc.
 #[cfg(not(test))]
-type OffsetType = u32;
+type OffsetType = i32;
 
 // To trigger overflow
 #[cfg(test)]
 type OffsetType = i8;
 
 // If we don't do this the GC of binview will trigger. As we will split up buffers into multiple
-// chunks so that we don't overflow the offset u32.
+// chunks so that we don't overflow the signed offset.
 fn truncate_buffer(buf: &Buffer<u8>) -> Buffer<u8> {
-    // * 2, as it must be able to hold u32::MAX offset + u32::MAX len.
+    // * 2, as it must be able to hold an offset and the length of a row at that offset.
     let len = std::cmp::min(buf.len(), ((OffsetType::MAX as u64) * 2) as usize);
     buf.clone().sliced(..len)
 }
@@ -103,10 +106,10 @@ pub fn binary_to_binview<O: Offset>(arr: &BinaryArray<O>) -> BinaryViewArray {
     let mut buffers = vec![truncate_buffer(&base_buffer)];
 
     for bytes in arr.values_iter() {
-        let len: u32 = bytes
-            .len()
-            .try_into()
-            .expect("max string/binary length exceeded");
+        // The Arrow spec stores length as a signed i32; reject rows that would overflow.
+        let len: u32 = i32::try_from(bytes.len())
+            .expect("max string/binary length exceeded (must fit in i32)")
+            as u32;
 
         let mut payload = [0; 16];
         payload[0..4].copy_from_slice(&len.to_le_bytes());

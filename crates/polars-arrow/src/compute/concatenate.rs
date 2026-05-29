@@ -293,10 +293,12 @@ fn concatenate_view<V: ViewType + ?Sized, A: AsRef<dyn Array>>(
                 .sum::<usize>();
         }
 
+        // The Arrow binary view spec stores offsets as signed i32, so each new buffer must stay
+        // within i32::MAX bytes for spec-compliant interop.
+        const MAX_BUF_SIZE: usize = i32::MAX as usize;
         let mut unprocessed_buffer_len = total_buffer_len;
-        let mut new_buffers: Vec<Vec<u8>> = vec![Vec::with_capacity(
-            unprocessed_buffer_len.min(u32::MAX as usize),
-        )];
+        let mut new_buffers: Vec<Vec<u8>> =
+            vec![Vec::with_capacity(unprocessed_buffer_len.min(MAX_BUF_SIZE))];
         for arr in arrays {
             let arr: &BinaryViewArrayGeneric<V> = arr.as_ref().as_any().downcast_ref().unwrap();
             let buffers = arr.data_buffers();
@@ -305,11 +307,10 @@ fn concatenate_view<V: ViewType + ?Sized, A: AsRef<dyn Array>>(
                 for mut view in arr.views().iter().copied() {
                     if view.length > 12 {
                         if new_buffers.last().unwrap_unchecked().len() + view.length as usize
-                            >= u32::MAX as usize
+                            > MAX_BUF_SIZE
                         {
-                            new_buffers.push(Vec::with_capacity(
-                                unprocessed_buffer_len.min(u32::MAX as usize),
-                            ));
+                            new_buffers
+                                .push(Vec::with_capacity(unprocessed_buffer_len.min(MAX_BUF_SIZE)));
                         }
                         let new_offset = new_buffers.last().unwrap_unchecked().len() as u32;
                         new_buffers

@@ -10,7 +10,7 @@ use polars_utils::aliases::{InitHashMaps, PlHashMap};
 use crate::array::binview::iterator::MutableBinaryViewValueIter;
 use crate::array::binview::view::validate_views_utf8_only;
 use crate::array::binview::{
-    BinaryViewArrayGeneric, DEFAULT_BLOCK_SIZE, MAX_EXP_BLOCK_SIZE, ViewType,
+    BinaryViewArrayGeneric, DEFAULT_BLOCK_SIZE, MAX_BUFFER_LEN, MAX_EXP_BLOCK_SIZE, ViewType,
 };
 use crate::array::{Array, MutableArray, TryExtend, TryPush, View};
 use crate::bitmap::MutableBitmap;
@@ -298,7 +298,7 @@ impl<T: ViewType + ?Sized> MutableBinaryViewArray<T> {
 
     /// Get a [`View`] for a specific set of bytes.
     pub fn push_value_into_buffer(&mut self, bytes: &[u8]) -> View {
-        assert!(bytes.len() <= u32::MAX as usize);
+        assert!(bytes.len() <= MAX_BUFFER_LEN);
 
         if bytes.len() <= View::MAX_INLINE_SIZE as usize {
             View::new_inline(bytes)
@@ -311,8 +311,9 @@ impl<T: ViewType + ?Sized> MutableBinaryViewArray<T> {
             let required_capacity = self.in_progress_buffer.len() + bytes.len();
             let does_not_fit_in_buffer = self.in_progress_buffer.capacity() < required_capacity;
 
-            // We can only save offsets that are below u32::MAX
-            let offset_will_not_fit = self.in_progress_buffer.len() > u32::MAX as usize;
+            // Buffers must stay within the Arrow spec limit (signed i32 offsets) so that exports
+            // do not need to repack and other Arrow implementations can read our data.
+            let offset_will_not_fit = required_capacity > MAX_BUFFER_LEN;
 
             if does_not_fit_in_buffer || offset_will_not_fit {
                 // Allocate a new buffer and flush the old buffer
@@ -683,7 +684,7 @@ impl MutableBinaryViewArray<[u8]> {
 
         let mut buffer_offset = 0;
         if min_length > View::MAX_INLINE_SIZE as usize
-            && (num_items == 1 || sum_length + self.in_progress_buffer.len() <= u32::MAX as usize)
+            && sum_length + self.in_progress_buffer.len() <= MAX_BUFFER_LEN
         {
             let buffer_idx = self.completed_buffers().len() as u32;
             let in_progress_buffer_offset = self.in_progress_buffer.len();
