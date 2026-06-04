@@ -54,10 +54,12 @@ static UTF8_VIEW_TYPE: ArrowDataType = ArrowDataType::Utf8View;
 // Growth parameters of view array buffers.
 const DEFAULT_BLOCK_SIZE: usize = 8 * 1024;
 const MAX_EXP_BLOCK_SIZE: usize = 16 * 1024 * 1024;
-/// The Arrow spec mandates all integers in binary view layouts (length, buffer index, offset)
-/// are signed `i32`. Keeping data buffers at or below this size keeps offsets valid for
-/// interop with other Arrow implementations and avoids needing to repack on export.
+/// Spec offset cap for views into a shared buffer: a view's `offset + length` must fit in
+/// `i32`. Rows whose own length exceeds this get a dedicated buffer (see [`MAX_ROW_BYTE_LEN`]).
 pub(crate) const MAX_BUFFER_LEN: usize = i32::MAX as usize;
+/// Per-row length cap. Rows above [`MAX_BUFFER_LEN`] are placed in a dedicated buffer.
+/// `u32::MAX` is preserved and should not be considered as a valid length.
+pub(crate) const MAX_ROW_BYTE_LEN: usize = (u32::MAX - 1) as usize;
 
 pub trait ViewType: Sealed + 'static + PartialEq + AsRef<Self> {
     const IS_UTF8: bool;

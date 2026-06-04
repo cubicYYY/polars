@@ -293,8 +293,8 @@ fn concatenate_view<V: ViewType + ?Sized, A: AsRef<dyn Array>>(
                 .sum::<usize>();
         }
 
-        // The Arrow binary view spec stores offsets as signed i32, so each new buffer must stay
-        // within i32::MAX bytes for spec-compliant interop.
+        // Each shared buffer keeps every view's `offset + length` within `MAX_BUF_SIZE`.
+        // Rows longer than that get a dedicated buffer where the view's offset is `0`.
         const MAX_BUF_SIZE: usize = i32::MAX as usize;
         let mut unprocessed_buffer_len = total_buffer_len;
         let mut new_buffers: Vec<Vec<u8>> =
@@ -306,24 +306,53 @@ fn concatenate_view<V: ViewType + ?Sized, A: AsRef<dyn Array>>(
             unsafe {
                 for mut view in arr.views().iter().copied() {
                     if view.length > 12 {
-                        if new_buffers.last().unwrap_unchecked().len() + view.length as usize
-                            > MAX_BUF_SIZE
-                        {
-                            new_buffers
-                                .push(Vec::with_capacity(unprocessed_buffer_len.min(MAX_BUF_SIZE)));
+                        let view_len = view.length as usize;
+                        let bytes = view.get_slice_unchecked(buffers);
+                        if view_len > MAX_BUF_SIZE {
+                            std::hint::cold_path();
+                            if new_buffers.last().unwrap_unchecked().is_empty() {
+                                let current = new_buffers.last_mut().unwrap_unchecked();
+                                current.reserve_exact(view_len);
+                                current.extend_from_slice(bytes);
+                            } else {
+                                let mut oversize = Vec::with_capacity(view_len);
+                                oversize.extend_from_slice(bytes);
+                                new_buffers.push(oversize);
+                            }
+                            view.offset = 0;
+                            view.buffer_idx = new_buffers.len() as u32 - 1;
+                            new_buffers.push(Vec::with_capacity(
+                                unprocessed_buffer_len
+                                    .saturating_sub(view_len)
+                                    .min(MAX_BUF_SIZE),
+                            ));
+                        } else {
+                            if new_buffers.last().unwrap_unchecked().len() + view_len > MAX_BUF_SIZE
+                            {
+                                std::hint::cold_path();
+                                new_buffers.push(Vec::with_capacity(
+                                    unprocessed_buffer_len.min(MAX_BUF_SIZE),
+                                ));
+                            }
+                            let last = new_buffers.last_mut().unwrap_unchecked();
+                            let new_offset = last.len() as u32;
+                            last.extend_from_slice(bytes);
+                            view.offset = new_offset;
+                            view.buffer_idx = new_buffers.len() as u32 - 1;
                         }
-                        let new_offset = new_buffers.last().unwrap_unchecked().len() as u32;
-                        new_buffers
-                            .last_mut()
-                            .unwrap_unchecked()
-                            .extend_from_slice(view.get_slice_unchecked(buffers));
-                        view.offset = new_offset;
-                        view.buffer_idx = new_buffers.len() as u32 - 1;
-                        unprocessed_buffer_len -= view.length as usize;
+                        unprocessed_buffer_len = unprocessed_buffer_len.saturating_sub(view_len);
                     }
                     views.push_unchecked(view);
                 }
             }
+        }
+
+        // Drop the trailing empty shared buffer left after a final oversize-row rotation.
+        if new_buffers
+            .last()
+            .is_some_and(|b| b.is_empty() && new_buffers.len() > 1)
+        {
+            new_buffers.pop();
         }
 
         new_buffers.into_iter().map(Buffer::from).collect()

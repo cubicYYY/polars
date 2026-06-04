@@ -209,11 +209,16 @@ pub fn fixed_size_binary_to_binview(from: &FixedSizeBinaryArray) -> BinaryViewAr
             .unwrap();
     }
 
-    // The Arrow binary view layout uses signed i32 offsets, so each data buffer must stay within
-    // i32::MAX bytes for spec-compliant interop with PyArrow / DuckDB / etc.
+    // Each shared buffer keeps every view's `offset + length` within `i32::MAX`.
+    // Rows longer than that get a dedicated buffer where the view's offset is `0`.
     const MAX_BYTES_PER_BUFFER: usize = i32::MAX as usize;
 
     let size = from.size();
+
+    if size > MAX_BYTES_PER_BUFFER {
+        return fixed_size_binary_to_binview_oversize(from, datatype);
+    }
+
     let num_bytes = from.len() * size;
     let num_buffers = num_bytes.div_ceil(MAX_BYTES_PER_BUFFER);
     assert!(num_buffers < u32::MAX as usize);
@@ -253,6 +258,30 @@ pub fn fixed_size_binary_to_binview(from: &FixedSizeBinaryArray) -> BinaryViewAr
     let views = views.into();
 
     BinaryViewArray::try_new(datatype, views, buffers.into(), from.validity().cloned()).unwrap()
+}
+
+/// Slow path: every fixed-size element exceeds `i32::MAX` bytes, so each gets its own buffer.
+#[cold]
+fn fixed_size_binary_to_binview_oversize(
+    from: &FixedSizeBinaryArray,
+    datatype: ArrowDataType,
+) -> BinaryViewArray {
+    assert!(from.len() < u32::MAX as usize);
+    let size = from.size();
+    let mut buffer = from.values().clone();
+    let mut buffers = Vec::with_capacity(from.len());
+    let mut views = Vec::with_capacity(from.len());
+    for buffer_idx in 0..from.len() {
+        let slice;
+        (slice, buffer) = buffer.split_at(size);
+        // SAFETY: size > i32::MAX > View::MAX_INLINE_SIZE so the view is non-inline.
+        let view =
+            unsafe { View::new_noninline_unchecked(slice.as_ref(), buffer_idx as u32, 0) };
+        views.push(view);
+        buffers.push(slice);
+    }
+    BinaryViewArray::try_new(datatype, views.into(), buffers.into(), from.validity().cloned())
+        .unwrap()
 }
 
 /// Conversion of binary

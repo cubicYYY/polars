@@ -6,7 +6,9 @@ use polars_buffer::Buffer;
 use polars_utils::IdxSize;
 use polars_utils::aliases::{InitHashMaps, PlHashMap};
 
-use crate::array::binview::{DEFAULT_BLOCK_SIZE, MAX_BUFFER_LEN, MAX_EXP_BLOCK_SIZE};
+use crate::array::binview::{
+    DEFAULT_BLOCK_SIZE, MAX_BUFFER_LEN, MAX_EXP_BLOCK_SIZE, MAX_ROW_BYTE_LEN,
+};
 use crate::array::builder::{ShareStrategy, StaticArrayBuilder};
 use crate::array::{Array, BinaryViewArrayGeneric, View, ViewType};
 use crate::bitmap::OptBitmapBuilder;
@@ -38,7 +40,7 @@ pub struct BinaryViewArrayGenericBuilder<V: ViewType + ?Sized> {
 }
 
 impl<V: ViewType + ?Sized> BinaryViewArrayGenericBuilder<V> {
-    pub const MAX_ROW_BYTE_LEN: usize = MAX_BUFFER_LEN;
+    pub const MAX_ROW_BYTE_LEN: usize = MAX_ROW_BYTE_LEN;
 
     pub fn new(dtype: ArrowDataType) -> Self {
         Self {
@@ -58,11 +60,15 @@ impl<V: ViewType + ?Sized> BinaryViewArrayGenericBuilder<V> {
         }
     }
 
+    /// Ensure the active buffer can fit `additional` more bytes while keeping the next view's
+    /// `offset + length` within `MAX_BUFFER_LEN`. Oversized rows are routed elsewhere.
     #[inline]
     fn reserve_active_buffer(&mut self, additional: usize) {
         let len = self.active_buffer.len();
         let cap = self.active_buffer.capacity();
-        if additional > cap - len || len + additional >= Self::MAX_ROW_BYTE_LEN {
+        let does_not_fit_in_buffer = additional > cap - len;
+        let offset_will_not_fit = len + additional > MAX_BUFFER_LEN;
+        if does_not_fit_in_buffer || offset_will_not_fit {
             self.reserve_active_buffer_slow(additional);
         }
     }
@@ -71,7 +77,7 @@ impl<V: ViewType + ?Sized> BinaryViewArrayGenericBuilder<V> {
     fn reserve_active_buffer_slow(&mut self, additional: usize) {
         assert!(
             additional <= Self::MAX_ROW_BYTE_LEN,
-            "binary view rows must not exceed i32::MAX bytes (Arrow spec)"
+            "binary view rows must not exceed u32::MAX - 1 bytes"
         );
 
         // Allocate a new buffer and flush the old buffer.
@@ -89,19 +95,58 @@ impl<V: ViewType + ?Sized> BinaryViewArrayGenericBuilder<V> {
         self.buffer_set.push(PLACEHOLDER_BUFFER.clone()) // Push placeholder so active_buffer_idx stays valid.
     }
 
+    /// Place an oversized row (length `> MAX_BUFFER_LEN`) in a dedicated buffer at offset 0.
+    ///
+    /// On entry, the steady-state invariant from [`Self::reserve_active_buffer_slow`] is that
+    /// `active_buffer_idx` points to a placeholder slot at the end of `buffer_set`. We reuse
+    /// that slot (or freeze the active buffer into it if non-empty) and append the dedicated
+    /// oversize buffer right after. We do NOT push a new placeholder: `active_buffer_idx` is
+    /// left equal to `buffer_set.len()` so the next [`Self::reserve_active_buffer_slow`] will
+    /// install a fresh placeholder there in one step (avoiding stale empty buffers).
+    #[cold]
+    fn push_oversize_row_buffer(&mut self, bytes: &[u8]) -> View {
+        // The "is this really oversize?" check lives at the only call site
+        // ([`Self::push_value_ignore_validity`]); here we only need the safety precondition
+        // for [`View::new_noninline_unchecked`] (length fits in a u32 and is not inline).
+        debug_assert!(bytes.len() > View::MAX_INLINE_SIZE as usize);
+        debug_assert!(bytes.len() <= Self::MAX_ROW_BYTE_LEN);
+
+        if !self.active_buffer.is_empty() {
+            let old_buffer = core::mem::take(&mut self.active_buffer);
+            self.buffer_set[self.active_buffer_idx as usize] = Buffer::from(old_buffer);
+        } else if (self.active_buffer_idx as usize) < self.buffer_set.len() {
+            // The active slot still holds the empty placeholder; drop it so the dedicated
+            // buffer goes into that slot and indices stay tight.
+            self.buffer_set.pop();
+        }
+
+        let oversize_idx: u32 = self.buffer_set.len().try_into().unwrap();
+        self.buffer_set.push(Buffer::from(bytes.to_vec()));
+
+        // Leave `active_buffer_idx == buffer_set.len()` (one past the end). The next call into
+        // `reserve_active_buffer_slow` will push the new placeholder for it.
+        self.active_buffer_idx = self.buffer_set.len().try_into().unwrap();
+
+        // SAFETY: caller ensures bytes is non-inline.
+        unsafe { View::new_noninline_unchecked(bytes, oversize_idx, 0) }
+    }
+
     pub fn push_value_ignore_validity(&mut self, bytes: &V) {
         let bytes = bytes.to_bytes();
         self.total_bytes_len += bytes.len();
         unsafe {
-            let view = if bytes.len() > View::MAX_INLINE_SIZE as usize {
+            let view = if bytes.len() <= View::MAX_INLINE_SIZE as usize {
+                View::new_inline_unchecked(bytes)
+            } else if bytes.len() > MAX_BUFFER_LEN {
+                self.total_buffer_len += bytes.len();
+                self.push_oversize_row_buffer(bytes)
+            } else {
                 self.reserve_active_buffer(bytes.len());
 
                 let offset = self.active_buffer.len() as u32; // Ensured no overflow by reserve_active_buffer.
                 self.active_buffer.extend_from_slice(bytes);
                 self.total_buffer_len += bytes.len();
                 View::new_noninline_unchecked(bytes, self.active_buffer_idx, offset)
-            } else {
-                View::new_inline_unchecked(bytes)
             };
             self.views.push(view);
         }
@@ -462,5 +507,78 @@ impl<V: ViewType + ?Sized> StaticArrayBuilder for BinaryViewArrayGenericBuilder<
 
         self.validity
             .opt_gather_extend_from_opt_validity(other.validity(), idxs, other.len());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Small helper: directly invoke the oversize cold path (private) with an arbitrary-sized
+    /// payload (no allocation of a real i32::MAX buffer needed) and append the resulting view.
+    fn push_oversize_for_test<V: ViewType + ?Sized>(
+        b: &mut BinaryViewArrayGenericBuilder<V>,
+        bytes: &[u8],
+    ) {
+        b.total_bytes_len += bytes.len();
+        b.total_buffer_len += bytes.len();
+        let view = b.push_oversize_row_buffer(bytes);
+        b.views.push(view);
+        b.validity.extend_constant(1, true);
+    }
+
+    /// Oversize-row-then-small-row must NOT leave a stale empty placeholder behind.
+    #[test]
+    fn oversize_then_small_no_obsolete_buffer() {
+        let mut b = BinaryViewArrayGenericBuilder::<[u8]>::new(ArrowDataType::BinaryView);
+        push_oversize_for_test(&mut b, &vec![b'x'; 100]);
+        b.push_value_ignore_validity(b"a long enough string to be non-inline");
+        let arr = b.freeze();
+        for (i, buf) in arr.data_buffers().iter().enumerate() {
+            assert!(
+                !buf.is_empty(),
+                "data buffer {i} is empty (obsolete buffer left behind)"
+            );
+        }
+        assert_eq!(arr.value(0).len(), 100);
+        assert_eq!(arr.value(1), b"a long enough string to be non-inline");
+        assert_eq!(arr.data_buffers().len(), 2);
+    }
+
+    /// "Small, oversize, small" - the oversize must seal the previous active buffer and the
+    /// trailing small must land in a fresh buffer (not the oversize one).
+    #[test]
+    fn small_oversize_small_no_obsolete_buffer() {
+        let mut b = BinaryViewArrayGenericBuilder::<[u8]>::new(ArrowDataType::BinaryView);
+        b.push_value_ignore_validity(b"first non-inline string here");
+        push_oversize_for_test(&mut b, &vec![b'y'; 100]);
+        b.push_value_ignore_validity(b"trailing non-inline string here");
+        let arr = b.freeze();
+        for (i, buf) in arr.data_buffers().iter().enumerate() {
+            assert!(
+                !buf.is_empty(),
+                "data buffer {i} is empty (obsolete buffer left behind)"
+            );
+        }
+        assert_eq!(arr.value(0), b"first non-inline string here");
+        assert_eq!(arr.value(1).len(), 100);
+        assert_eq!(arr.value(2), b"trailing non-inline string here");
+        assert_eq!(arr.data_buffers().len(), 3);
+    }
+
+    /// Two consecutive oversize rows must produce exactly two buffers and no placeholder.
+    #[test]
+    fn two_oversize_in_a_row_no_obsolete_buffer() {
+        let mut b = BinaryViewArrayGenericBuilder::<[u8]>::new(ArrowDataType::BinaryView);
+        push_oversize_for_test(&mut b, &vec![b'a'; 100]);
+        push_oversize_for_test(&mut b, &vec![b'b'; 100]);
+        let arr = b.freeze();
+        for (i, buf) in arr.data_buffers().iter().enumerate() {
+            assert!(
+                !buf.is_empty(),
+                "data buffer {i} is empty (obsolete buffer left behind)"
+            );
+        }
+        assert_eq!(arr.data_buffers().len(), 2);
     }
 }
