@@ -276,14 +276,17 @@ fn fixed_size_binary_to_binview_oversize(
         let slice;
         (slice, buffer) = buffer.split_at(size);
         // SAFETY: size > i32::MAX > View::MAX_INLINE_SIZE so the view is non-inline.
-        let view = unsafe {
-            View::new_noninline_unchecked(slice.as_ref(), buffer_idx as u32, 0)
-        };
+        let view = unsafe { View::new_noninline_unchecked(slice.as_ref(), buffer_idx as u32, 0) };
         views.push(view);
         buffers.push(slice);
     }
-    BinaryViewArray::try_new(datatype, views.into(), buffers.into(), from.validity().cloned())
-        .unwrap()
+    BinaryViewArray::try_new(
+        datatype,
+        views.into(),
+        buffers.into(),
+        from.validity().cloned(),
+    )
+    .unwrap()
 }
 
 /// Conversion of binary

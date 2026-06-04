@@ -534,8 +534,8 @@ mod tests {
     #[test]
     fn two_oversize_in_a_row_no_obsolete_buffer() {
         let mut b = BinaryViewArrayGenericBuilder::<[u8]>::new(ArrowDataType::BinaryView);
-        push_oversize_for_test(&mut b, &vec![b'a'; 100]);
-        push_oversize_for_test(&mut b, &vec![b'b'; 100]);
+        push_oversize_for_test(&mut b, &[b'a'; 100]);
+        push_oversize_for_test(&mut b, &[b'b'; 100]);
         let arr = b.freeze();
         for (i, buf) in arr.data_buffers().iter().enumerate() {
             assert!(!buf.is_empty(), "data buffer {i} is empty");
@@ -547,7 +547,7 @@ mod tests {
     #[test]
     fn oversize_then_small_no_obsolete_buffer() {
         let mut b = BinaryViewArrayGenericBuilder::<[u8]>::new(ArrowDataType::BinaryView);
-        push_oversize_for_test(&mut b, &vec![b'x'; 100]);
+        push_oversize_for_test(&mut b, &[b'x'; 100]);
         b.push_value_ignore_validity(b"a long enough string to be non-inline");
         let arr = b.freeze();
         for (i, buf) in arr.data_buffers().iter().enumerate() {
@@ -565,7 +565,7 @@ mod tests {
     fn small_oversize_small_no_obsolete_buffer() {
         let mut b = BinaryViewArrayGenericBuilder::<[u8]>::new(ArrowDataType::BinaryView);
         b.push_value_ignore_validity(b"first non-inline string here");
-        push_oversize_for_test(&mut b, &vec![b'y'; 100]);
+        push_oversize_for_test(&mut b, &[b'y'; 100]);
         b.push_value_ignore_validity(b"trailing non-inline string here");
         let arr = b.freeze();
         for (i, buf) in arr.data_buffers().iter().enumerate() {

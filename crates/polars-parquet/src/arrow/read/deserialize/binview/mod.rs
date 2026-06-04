@@ -458,8 +458,11 @@ pub fn decode_plain_generic(
         // This is allowed if none of the strings start with a UTF-8 continuation byte, so we keep
         // track of that during the decoding. Each rotated `extra_buffers`
         // entry has the same property and is verified independently.
-        let extra_buffers_valid_utf8 =
-            || extra_buffers.iter().all(|b| simdutf8::basic::from_utf8(b).is_ok());
+        let extra_buffers_valid_utf8 = || {
+            extra_buffers
+                .iter()
+                .all(|b| simdutf8::basic::from_utf8(b).is_ok())
+        };
         if num_inlined == 0 {
             if !none_starting_with_continuation_byte
                 || simdutf8::basic::from_utf8(&buffer).is_err()

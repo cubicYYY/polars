@@ -939,8 +939,7 @@ mod tests {
         // at offset 0 of that buffer.
         let oversize: Vec<u8> = vec![b'y'; 100];
         let buffer_idx = bv.push_buffer(oversize.clone().into());
-        let oversize_view =
-            unsafe { View::new_noninline_unchecked(&oversize, buffer_idx, 0) };
+        let oversize_view = unsafe { View::new_noninline_unchecked(&oversize, buffer_idx, 0) };
         unsafe { bv.views_mut() }.push(oversize_view);
         bv.total_bytes_len += oversize.len();
 
@@ -966,8 +965,7 @@ mod tests {
         let mut bv = MutableBinaryViewArray::<[u8]>::with_capacity(0);
         let oversize: Vec<u8> = vec![b'x'; 100];
         let buffer_idx = bv.push_buffer(oversize.clone().into());
-        let oversize_view =
-            unsafe { View::new_noninline_unchecked(&oversize, buffer_idx, 0) };
+        let oversize_view = unsafe { View::new_noninline_unchecked(&oversize, buffer_idx, 0) };
         unsafe { bv.views_mut() }.push(oversize_view);
         bv.total_bytes_len += oversize.len();
 

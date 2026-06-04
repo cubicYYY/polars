@@ -329,9 +329,8 @@ fn cast_list_uint8_to_binary<O: Offset>(list: &ListArray<O>) -> PolarsResult<Bin
 
             // SAFETY: length > MAX_BUF_SIZE >= View::MAX_INLINE_SIZE so the
             // view is non-inline.
-            let view = unsafe {
-                View::new_noninline_unchecked(&slice[start..end], oversize_idx, 0)
-            };
+            let view =
+                unsafe { View::new_noninline_unchecked(&slice[start..end], oversize_idx, 0) };
             all_views_inline = false;
             views.push(view);
             continue;
@@ -1249,7 +1248,10 @@ mod tests {
         let arr: &BinaryViewArray = binary.as_ref().as_any().downcast_ref().unwrap();
         assert_eq!(
             arr.values_iter().map(|s| s.to_vec()).collect::<Vec<_>>(),
-            vec![(0u8..20).collect::<Vec<_>>(), (20u8..40).collect::<Vec<_>>()],
+            vec![
+                (0u8..20).collect::<Vec<_>>(),
+                (20u8..40).collect::<Vec<_>>()
+            ],
         );
         // Both views reference offset 0 in their own dedicated buffers.
         for view in arr.views().iter() {
